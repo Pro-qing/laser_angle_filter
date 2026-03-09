@@ -1,0 +1,13 @@
+<launch>
+    <!-- 雷达过滤节点 -->
+    <node pkg="laser_angle_filter" type="laser_filter_node" name="laser_filter_node" output="screen">
+        <param name="scan_in_topic" value="/scan_left" />
+        <param name="scan_out_topic" value="/scan_left_filtered" />
+    </node>
+
+    <!-- 启动动态调参 UI -->
+    <node pkg="rqt_reconfigure" type="rqt_reconfigure" name="rqt_reconfigure" />
+
+    <!-- 启动 RViz (去掉原来强制读取文件的参数，让它直接空壳启动) -->
+    <node pkg="rviz" type="rviz" name="rviz" />
+</launch>
