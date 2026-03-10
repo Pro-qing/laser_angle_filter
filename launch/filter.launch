@@ -1,8 +1,8 @@
 <launch>
     <!-- 雷达过滤节点 -->
     <node pkg="laser_angle_filter" type="laser_filter_node" name="laser_filter_node" output="screen">
-        <param name="scan_in_topic" value="/scan_left" />
-        <param name="scan_out_topic" value="/scan_left_filtered" />
+        <param name="scan_in_topic" value="/scan_right" />
+        <param name="scan_out_topic" value="/scan_filtered" />
     </node>
 
     <!-- 启动动态调参 UI -->

@@ -10,24 +10,19 @@ class LaserFilterNode
 public:
     LaserFilterNode() : nh_("~")
     {
-        // 1. 获取输入输出话题名参数 (带默认值)
         std::string scan_in_topic, scan_out_topic;
         nh_.param<std::string>("scan_in_topic", scan_in_topic, "/scan");
         nh_.param<std::string>("scan_out_topic", scan_out_topic, "/scan_filtered");
 
-        // 2. 初始化动态调参服务器
         dyn_server_ = new dynamic_reconfigure::Server<laser_angle_filter::LaserFilterConfig>(nh_);
         dynamic_reconfigure::Server<laser_angle_filter::LaserFilterConfig>::CallbackType f;
         f = boost::bind(&LaserFilterNode::reconfigureCallback, this, _1, _2);
         dyn_server_->setCallback(f);
 
-        // 3. 初始化订阅者和发布者
         sub_ = nh_.subscribe(scan_in_topic, 10, &LaserFilterNode::scanCallback, this);
         pub_ = nh_.advertise<sensor_msgs::LaserScan>(scan_out_topic, 10);
 
-        ROS_INFO("Laser Filter Node Started!");
-        ROS_INFO("Subscribing to: %s", scan_in_topic.c_str());
-        ROS_INFO("Publishing to: %s", scan_out_topic.c_str());
+        ROS_INFO("Laser Filter Node Started! Using 0-360 Degree Logic.");
     }
 
     ~LaserFilterNode()
@@ -41,51 +36,61 @@ private:
     ros::Publisher pub_;
     dynamic_reconfigure::Server<laser_angle_filter::LaserFilterConfig>* dyn_server_;
 
-    // 存储过滤角度 (弧度)
     double a1_min_rad_, a1_max_rad_;
     double a2_min_rad_, a2_max_rad_;
 
-    // 角度转弧度
     double deg2rad(double deg) { return deg * M_PI / 180.0; }
 
-    // 动态调参回调函数
     void reconfigureCallback(laser_angle_filter::LaserFilterConfig &config, uint32_t level)
     {
-        // 将度数转换为弧度，并确保 min 小于 max
-        a1_min_rad_ = deg2rad(std::min(config.angle1_min, config.angle1_max));
-        a1_max_rad_ = deg2rad(std::max(config.angle1_min, config.angle1_max));
+        // 这里的 min 和 max 不再强制排序，因为用户可能输入 min=350, max=10 (跨越0度)
+        a1_min_rad_ = deg2rad(config.angle1_min);
+        a1_max_rad_ = deg2rad(config.angle1_max);
         
-        a2_min_rad_ = deg2rad(std::min(config.angle2_min, config.angle2_max));
-        a2_max_rad_ = deg2rad(std::max(config.angle2_min, config.angle2_max));
+        a2_min_rad_ = deg2rad(config.angle2_min);
+        a2_max_rad_ = deg2rad(config.angle2_max);
 
-        ROS_INFO("Updated Filter Ranges (deg): Filter1[%.1f, %.1f], Filter2[%.1f, %.1f]", 
+        ROS_INFO("Filter1: [%.1f, %.1f], Filter2: [%.1f, %.1f]", 
                  config.angle1_min, config.angle1_max, config.angle2_min, config.angle2_max);
     }
 
-    // 雷达数据处理回调函数
+    // 检查角度是否在过滤范围内 (兼容跨越0度线的情况)
+    bool isAngleInFilter(double angle, double min_rad, double max_rad)
+    {
+        if (min_rad <= max_rad) {
+            // 正常情况，例如 10度 到 90度
+            return (angle >= min_rad && angle <= max_rad);
+        } else {
+            // 跨越 0度线情况，例如 350度 到 10度
+            return (angle >= min_rad || angle <= max_rad);
+        }
+    }
+
     void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg)
     {
-        // 复制一份雷达数据用于修改
         sensor_msgs::LaserScan filtered_scan = *msg;
 
-        // 遍历所有激光束
         for (size_t i = 0; i < msg->ranges.size(); ++i)
         {
-            // 计算当前激光点的角度
             double current_angle = msg->angle_min + i * msg->angle_increment;
 
-            // 判断当前角度是否在两个过滤区间内
-            bool in_filter1 = (current_angle >= a1_min_rad_ && current_angle <= a1_max_rad_);
-            bool in_filter2 = (current_angle >= a2_min_rad_ && current_angle <= a2_max_rad_);
+            // 1. 将雷达发出的任意角度强制转换到 0 ~ 2π (即 0 ~ 360度) 之间
+            current_angle = fmod(current_angle, 2.0 * M_PI);
+            if (current_angle < 0.0) {
+                current_angle += 2.0 * M_PI;
+            }
+
+            // 2. 检查过滤
+            bool in_filter1 = isAngleInFilter(current_angle, a1_min_rad_, a1_max_rad_);
+            bool in_filter2 = isAngleInFilter(current_angle, a2_min_rad_, a2_max_rad_);
 
             if (in_filter1 || in_filter2)
             {
-                // 如果在过滤区间内，将其距离设为无穷大（即过滤掉）
+                // 无效化点云
                 filtered_scan.ranges[i] = std::numeric_limits<float>::infinity();
             }
         }
 
-        // 发布过滤后的雷达数据
         pub_.publish(filtered_scan);
     }
 };
